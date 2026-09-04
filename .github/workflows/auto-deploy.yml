@@ -1,0 +1,29 @@
+name: Auto-deploy agent on change
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'agent.py'
+      - 'requirements.txt'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-agent
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy LiveKit Cloud Agent
+        uses: livekit/deploy-action@v2
+        env:
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+          SECRET_LIST: ${{ secrets.SECRET_LIST }}
+        with:
+          OPERATION: deploy
+          WORKING_DIRECTORY: .
