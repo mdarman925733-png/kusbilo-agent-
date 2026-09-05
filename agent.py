@@ -3,27 +3,14 @@ Kusbilo voice-ordering agent.
 
 Runs on LiveKit Cloud (no VM needed). Uses Gemini's realtime model for
 audio-in/audio-out directly, so there's no separate STT/TTS step.
-
-The Flutter app (lib/core/services/live_voice_service.dart) registers two
-RPC methods on itself — 'addToCart' and 'confirmOrder' — and expects THIS
-agent to call them via room.local_participant.perform_rpc(). That's what
-the two @function_tool functions below do: the tool call itself is just a
-forward, all the real logic (updating the cart, placing the order) still
-lives in the Flutter app.
-
-Catalog / FAQ / language: the Flutter app currently sends these as
-arguments to the `createLiveKitToken` Cloud Function, not as room state.
-For the agent to see them, that Cloud Function needs to also store them as
-room metadata (or you pass them another way) when it creates the room —
-see the README for the one-line change needed there. Until that's done,
-this agent falls back to a generic catalog-less greeting.
 """
 
 import json
 import logging
 import os
-from google.oauth2 import service_account
+
 from google.cloud import firestore
+from google.oauth2 import service_account
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -40,20 +27,16 @@ logger = logging.getLogger("kusbilo-voice-agent")
 logger.setLevel(logging.INFO)
 
 server = AgentServer()
+
 _creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if _creds_json:
     _credentials = service_account.Credentials.from_service_account_info(json.loads(_creds_json))
-        _firestore_client = firestore.Client(credentials=_credentials, project=_credentials.project_id)
-        else:
-            _firestore_client = firestore.Client()
+    _firestore_client = firestore.Client(credentials=_credentials, project=_credentials.project_id)
+else:
+    _firestore_client = firestore.Client()
 
 
 def _fetch_gemini_api_key() -> str:
-    """Reads settings/voiceAgent.geminiApiKey from Firestore, same admin
-    panel pattern as settings/paymentGateway.baseUrl for UPI. Re-read on
-    every call start so a key swapped in the admin panel (e.g. after
-    hitting a rate limit) takes effect on the very next call, no redeploy.
-    """
     doc = _firestore_client.collection("settings").document("voiceAgent").get()
     key = (doc.to_dict() or {}).get("geminiApiKey")
     if not key:
@@ -65,10 +48,6 @@ def _fetch_gemini_api_key() -> str:
 
 
 def _load_room_context(ctx: JobContext) -> dict:
-    """Room metadata is expected to be a JSON string like:
-    {"isHindi": true, "appFaq": "...", "catalog": "..."}
-    Falls back to safe defaults if it's missing or malformed.
-    """
     raw = ctx.room.metadata or "{}"
     try:
         data = json.loads(raw)
@@ -112,10 +91,7 @@ async def add_to_cart(context: RunContext, product_id: str, quantity: int) -> di
 
 @function_tool()
 async def confirm_order(context: RunContext) -> dict:
-    """Call this once the buyer says they're done and want to place the order.
-    Placing the order (location, Firestore write) happens on the app side —
-    this just tells the app to go ahead and wait for the result.
-    """
+    """Call this once the buyer says they're done and want to place the order."""
     ctx: JobContext = context.userdata["job_ctx"]
     try:
         raw = await ctx.room.local_participant.perform_rpc(
