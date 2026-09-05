@@ -36,15 +36,19 @@ else:
     _firestore_client = firestore.Client()
 
 
-def _fetch_gemini_api_key() -> str:
-    doc = _firestore_client.collection("settings").document("voiceAgent").get()
-    key = (doc.to_dict() or {}).get("geminiApiKey")
+def _fetch_gemini_config() -> dict:
+    """Reads settings/geminiLiveApi from Firestore — this is the same doc
+    Gaonadmin's "Voice Call" tab already writes to (apiKey + instructions).
+    """
+    doc = _firestore_client.collection("settings").document("geminiLiveApi").get()
+    data = doc.to_dict() or {}
+    key = data.get("apiKey")
     if not key:
         raise RuntimeError(
-            "settings/voiceAgent.geminiApiKey is not set in Firestore — "
-            "set it from the admin panel's voice-agent tab."
+            "settings/geminiLiveApi.apiKey is not set in Firestore — "
+            "set it from the admin panel's Voice Call tab."
         )
-    return key
+    return {"api_key": key, "admin_instructions": data.get("instructions", "")}
 
 
 def _load_room_context(ctx: JobContext) -> dict:
@@ -106,11 +110,16 @@ async def confirm_order(context: RunContext) -> dict:
         raise ToolError("Could not place the order, please try again.")
 
 
-def _build_instructions(room_ctx: dict) -> str:
+def _build_instructions(room_ctx: dict, admin_instructions: str) -> str:
     language_line = (
         "Speak Hindi throughout the call, in a warm, simple, everyday tone."
         if room_ctx["is_hindi"]
         else "Speak English throughout the call, in a warm, simple, everyday tone."
+    )
+    admin_block = (
+        f"\nCurrent notes from the shop admin (offers, greetings, tone) — follow these:\n{admin_instructions}\n"
+        if admin_instructions
+        else ""
     )
     return f"""You are Kusbilo's voice ordering assistant. {language_line}
 
@@ -121,7 +130,7 @@ Available products (id | names | price | tags | description):
 
 App FAQ, use this if the buyer asks a general question about the app:
 {room_ctx['app_faq'] or 'No FAQ was provided for this call.'}
-
+{admin_block}
 Rules:
 - Only offer products that appear in the catalog above. Never invent products or prices.
 - When the buyer clearly wants an item, call add_to_cart with its exact product id and quantity.
@@ -137,16 +146,17 @@ async def entrypoint(ctx: JobContext):
     await ctx.wait_for_participant()
 
     room_ctx = _load_room_context(ctx)
+    gemini_config = _fetch_gemini_config()
 
     agent = Agent(
-        instructions=_build_instructions(room_ctx),
+        instructions=_build_instructions(room_ctx, gemini_config["admin_instructions"]),
         tools=[add_to_cart, confirm_order],
     )
 
     session = AgentSession(
         llm=google.beta.realtime.RealtimeModel(
             model="gemini-2.5-flash-native-audio-preview-12-2025",
-            api_key=_fetch_gemini_api_key(),
+            api_key=gemini_config["api_key"],
         ),
         userdata={"job_ctx": ctx},
     )
