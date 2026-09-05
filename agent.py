@@ -10,6 +10,7 @@ import logging
 import os
 
 from google.cloud import firestore
+from google.genai import types as genai_types
 from google.oauth2 import service_account
 from livekit.agents import (
     Agent,
@@ -112,9 +113,9 @@ async def confirm_order(context: RunContext) -> dict:
 
 def _build_instructions(room_ctx: dict, admin_instructions: str) -> str:
     language_line = (
-        "Speak Hindi throughout the call, in a warm, simple, everyday tone."
+        "Speak Hindi throughout the call."
         if room_ctx["is_hindi"]
-        else "Speak English throughout the call, in a warm, simple, everyday tone."
+        else "Speak English throughout the call."
     )
     admin_block = (
         f"\nCurrent notes from the shop admin (offers, greetings, tone) — follow these:\n{admin_instructions}\n"
@@ -124,6 +125,13 @@ def _build_instructions(room_ctx: dict, admin_instructions: str) -> str:
     return f"""You are Kusbilo's voice ordering assistant. {language_line}
 
 You help the buyer pick items and place an order, entirely by voice.
+
+Speaking style: talk like a warm, friendly local shopkeeper on a phone call,
+not like a machine reading a menu. Use natural pacing, react genuinely to what
+the buyer says — a little laugh if something's funny, a warmer tone if they
+seem happy, quicker and more direct if they seem in a hurry. Use casual
+filler occasionally ("haan", "theek hai", "chaliye") the way a real person
+would, instead of formal, evenly-paced sentences every time.
 
 Available products (id | names | price | tags | description):
 {room_ctx['catalog'] or 'No catalog was provided for this call.'}
@@ -155,10 +163,24 @@ async def entrypoint(ctx: JobContext):
 
     session = AgentSession(
         llm=google.beta.realtime.RealtimeModel(
-    model="gemini-2.5-flash-native-audio-preview-12-2025",
-    voice="Leda",
-    api_key=gemini_config["api_key"],
-),
+            model="gemini-2.5-flash-native-audio-preview-12-2025",
+            voice="Leda",
+            api_key=gemini_config["api_key"],
+            # Without these, a Gemini Live session hard-fails ("context
+            # exhausted") after roughly 10 minutes — long enough that a
+            # buyer browsing and then confirming an order can hit it
+            # mid-call. This keeps the session alive by trimming older
+            # context and transparently reconnecting if the server drops
+            # the connection.
+            context_window_compression=genai_types.ContextWindowCompressionConfig(
+                sliding_window=genai_types.SlidingWindow()
+            ),
+            session_resumption=genai_types.SessionResumptionConfig(),
+            # Lets the model pick up on the buyer's tone/emotion and
+            # respond in kind, instead of one flat delivery for everything
+            # — this is the main lever against sounding robotic.
+            enable_affective_dialog=True,
+        ),
         userdata={"job_ctx": ctx},
     )
 
