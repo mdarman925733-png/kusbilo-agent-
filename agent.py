@@ -21,7 +21,8 @@ this agent falls back to a generic catalog-less greeting.
 
 import json
 import logging
-
+import os
+from google.oauth2 import service_account
 from google.cloud import firestore
 from livekit.agents import (
     Agent,
@@ -39,7 +40,12 @@ logger = logging.getLogger("kusbilo-voice-agent")
 logger.setLevel(logging.INFO)
 
 server = AgentServer()
-_firestore_client = firestore.Client()
+_creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+if _creds_json:
+    _credentials = service_account.Credentials.from_service_account_info(json.loads(_creds_json))
+        _firestore_client = firestore.Client(credentials=_credentials, project=_credentials.project_id)
+        else:
+            _firestore_client = firestore.Client()
 
 
 def _fetch_gemini_api_key() -> str:
