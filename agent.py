@@ -155,9 +155,10 @@ async def entrypoint(ctx: JobContext):
 
     session = AgentSession(
         llm=google.beta.realtime.RealtimeModel(
-            model="gemini-2.5-flash-native-audio-preview-12-2025",
-            api_key=gemini_config["api_key"],
-        ),
+    model="gemini-2.5-flash-native-audio-preview-12-2025",
+    voice="Leda",
+    api_key=gemini_config["api_key"],
+),
         userdata={"job_ctx": ctx},
     )
 
